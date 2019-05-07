@@ -154,7 +154,27 @@ func writeObjectWithID(id int, minioClient *minio.Client) {
 		log.Error("Cannot create temporary file: ", err)
 		return
 	}
-	log.Debugf("Object stored in read bucket: %s (%dB) ", objectNameWithID, n)
+	log.Debugf("Object stored in read bucket: %s (%dB)", objectNameWithID, n)
+}
+
+func readRndObject(minioClient *minio.Client) {
+	readOpCounter.Inc()
+	objectNameWithID := fmt.Sprintf("s3-loadgen-%d", rand.Intn(200)+1)
+	objectFilePath := fmt.Sprintf("/tmp/%s", objectNameWithID)
+
+	start := time.Now()
+	err := minioClient.FGetObject(readBucketName, objectNameWithID, objectFilePath, minio.GetObjectOptions{})
+	readDuration := time.Since(start)
+
+	if err != nil {
+		log.Errorf("Cannot get S3 object: %s (to %s) ", objectNameWithID, objectFilePath)
+		readErrCounter.Inc()
+		return
+	}
+	readDurationsHistogram.Observe(readDuration.Seconds())
+
+	defer os.Remove(objectFilePath)
+	log.Debugf("Object fetched from read bucket: %s", objectNameWithID)
 }
 
 func writeRndObject(minioClient *minio.Client) {
@@ -177,12 +197,13 @@ func writeRndObject(minioClient *minio.Client) {
 
 	start := time.Now()
 	n, err := minioClient.FPutObject(writeBucketName, path.Base(tmpfile.Name()), tmpfile.Name(), minio.PutObjectOptions{ContentType: "text/plain"})
+	writeDuration := time.Since(start)
+
 	if err != nil {
 		log.Error("Cannot create temporary file: ", err)
 		writeErrCounter.Inc()
 		return
 	}
-	writeDuration := time.Since(start)
 	writeDurationsHistogram.Observe(writeDuration.Seconds())
 
 	log.Debugf("Object stored: %s (%dB) in %f seconds", path.Base(tmpfile.Name()), n, writeDuration.Seconds())
@@ -192,6 +213,7 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
+	rand.Seed(time.Now().UnixNano())
 	initLogger()
 	initPrometheus()
 
@@ -223,7 +245,7 @@ func main() {
 		case <-tickerWrites.C:
 			go writeRndObject(minioClient)
 		case <-tickerReads.C:
-			// go readRndObject(minioClient)
+			go readRndObject(minioClient)
 		}
 	}
 }
