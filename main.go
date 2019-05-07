@@ -3,11 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"os"
-	"path"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go"
@@ -39,6 +40,14 @@ var (
 		Name: "s3_read_counter",
 		Help: "s3 reads operations counter.",
 	})
+	readMissCounter = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "s3_read_miss_counter",
+		Help: "s3 reads miss counter.",
+	})
+	readHitCounter = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "s3_read_hit_counter",
+		Help: "s3 reads hit counter.",
+	})
 	readErrCounter = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "s3_read_err_counter",
 		Help: "s3 read errors counter.",
@@ -46,12 +55,12 @@ var (
 	writeDurationsHistogram = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "s3_write_durations_histogram_seconds",
 		Help:    "S3 write operations latency distributions.",
-		Buckets: []float64{0.01, 0.0125, 0.015, 0.0175, 0.02, 0.025, 0.03, 0.04, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.25, 0.3, 0.4, 0.5},
+		Buckets: []float64{0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.11, 0.12, 0.14, 0.16, 0.18, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1},
 	})
 	readDurationsHistogram = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "s3_read_durations_histogram_seconds",
 		Help:    "S3 read operations latency distributions.",
-		Buckets: []float64{0.01, 0.0125, 0.015, 0.0175, 0.02, 0.025, 0.03, 0.04, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.25, 0.3, 0.4, 0.5},
+		Buckets: []float64{0.006, 0.01, 0.012, 0.014, 0.016, 0.018, 0.02, 0.024, 0.028, 0.035, 0.05, 0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5},
 	})
 )
 
@@ -68,6 +77,8 @@ func initPrometheus() {
 	prometheus.MustRegister(writeErrCounter)
 	prometheus.MustRegister(writeDurationsHistogram)
 	prometheus.MustRegister(readOpCounter)
+	prometheus.MustRegister(readHitCounter)
+	prometheus.MustRegister(readMissCounter)
 	prometheus.MustRegister(readErrCounter)
 	prometheus.MustRegister(readDurationsHistogram)
 }
@@ -120,7 +131,7 @@ func prepareBuckets(minioClient *minio.Client) {
 }
 
 func fillReadBucket(minioClient *minio.Client) {
-	for i := 1; i <= 1000; i++ {
+	for i := 1; i <= 2000; i++ {
 		writeObjectWithID(i, minioClient)
 	}
 }
@@ -134,24 +145,11 @@ func randomAlphaString(len int) string {
 }
 
 func writeObjectWithID(id int, minioClient *minio.Client) {
-	tmpfile, err := ioutil.TempFile("/tmp/", "s3-loadgen-")
-	defer tmpfile.Close()
-	defer os.Remove(tmpfile.Name())
-
 	objectNameWithID := fmt.Sprintf("s3-loadgen-%d", id)
 
+	n, err := minioClient.PutObject(readBucketName, objectNameWithID, strings.NewReader(randomAlphaString(250000)), 250000, minio.PutObjectOptions{ContentType: "text/plain"})
 	if err != nil {
-		log.Error("Cannot create temporary file: ", err)
-		return
-	}
-
-	if _, err = tmpfile.Write([]byte(randomAlphaString(250000))); err != nil {
-		log.Fatal("Failed to write to temporary file", err)
-	}
-
-	n, err := minioClient.FPutObject(readBucketName, objectNameWithID, tmpfile.Name(), minio.PutObjectOptions{ContentType: "text/plain"})
-	if err != nil {
-		log.Error("Cannot create temporary file: ", err)
+		log.Error("Cannot put S3 Object: ", err)
 		return
 	}
 	log.Debugf("Object stored in read bucket: %s (%dB)", objectNameWithID, n)
@@ -159,54 +157,58 @@ func writeObjectWithID(id int, minioClient *minio.Client) {
 
 func readRndObject(minioClient *minio.Client) {
 	readOpCounter.Inc()
-	objectNameWithID := fmt.Sprintf("s3-loadgen-%d", rand.Intn(1000)+1)
-	objectFilePath := fmt.Sprintf("/tmp/%s", objectNameWithID)
+	objectNameWithID := fmt.Sprintf("s3-loadgen-%d", rand.Intn(2000)+1)
 
 	start := time.Now()
-	err := minioClient.FGetObject(readBucketName, objectNameWithID, objectFilePath, minio.GetObjectOptions{})
-	readDuration := time.Since(start)
-
+	obj, err := minioClient.GetObject(readBucketName, objectNameWithID, minio.GetObjectOptions{})
 	if err != nil {
-		log.Errorf("Cannot get S3 object: %s (to %s) ", objectNameWithID, objectFilePath)
+		log.Errorf("Cannot touch S3 object %s : %s", objectNameWithID, err)
 		readErrCounter.Inc()
 		return
 	}
-	readDurationsHistogram.Observe(readDuration.Seconds())
+	defer obj.Close()
 
-	defer os.Remove(objectFilePath)
-	log.Debugf("Object fetched from read bucket: %s", objectNameWithID)
+	stat, err := obj.Stat()
+	if err != nil {
+		if err.Error() == "The specified key does not exist." {
+			log.Warnf("Object %s is missing in read bucket !", objectNameWithID)
+			readMissCounter.Inc()
+			return
+		}
+		log.Errorf("Cannot stats S3 object %s : %s", objectNameWithID, err)
+		readErrCounter.Inc()
+		return
+	}
+
+	n, err := io.CopyN(ioutil.Discard, obj, stat.Size)
+	readDuration := time.Since(start)
+	if err != nil {
+		log.Errorf("Cannot read S3 object %s : %s", objectNameWithID, err)
+		readErrCounter.Inc()
+		return
+	}
+
+	readDurationsHistogram.Observe(readDuration.Seconds())
+	readHitCounter.Inc()
+	log.Debugf("Object fetched: %s (%dB) in %f seconds", objectNameWithID, n, readDuration.Seconds())
 }
 
 func writeRndObject(minioClient *minio.Client) {
 	writeOpCounter.Inc()
-	tmpfile, err := ioutil.TempFile("/tmp/", "s3-loadgen-")
-	defer tmpfile.Close()
-	defer os.Remove(tmpfile.Name())
-
-	if err != nil {
-		log.Error("Cannot create temporary file: ", err)
-		writeErrCounter.Inc()
-		return
-	}
-
-	if _, err = tmpfile.Write([]byte(randomAlphaString(250000))); err != nil {
-		log.Fatal("Failed to write to temporary file", err)
-		writeErrCounter.Inc()
-		return
-	}
+	objectRandomName := fmt.Sprintf("s3-loadgen-%d", rand.Intn(9999999999)+1)
 
 	start := time.Now()
-	n, err := minioClient.FPutObject(writeBucketName, path.Base(tmpfile.Name()), tmpfile.Name(), minio.PutObjectOptions{ContentType: "text/plain"})
+	n, err := minioClient.PutObject(writeBucketName, objectRandomName, strings.NewReader(randomAlphaString(250000)), 250000, minio.PutObjectOptions{ContentType: "text/plain"})
 	writeDuration := time.Since(start)
 
 	if err != nil {
-		log.Error("Cannot create temporary file: ", err)
+		log.Error("Cannot put S3 Object: ", err)
 		writeErrCounter.Inc()
 		return
 	}
 	writeDurationsHistogram.Observe(writeDuration.Seconds())
 
-	log.Debugf("Object stored: %s (%dB) in %f seconds", path.Base(tmpfile.Name()), n, writeDuration.Seconds())
+	log.Debugf("Object stored: %s (%dB) in %f seconds", objectRandomName, n, writeDuration.Seconds())
 }
 
 func main() {
@@ -235,10 +237,7 @@ func main() {
 	prepareBuckets(minioClient)
 	fillReadBucket(minioClient)
 
-	// go writeObjectLoop(minioClient)
-	writeRndObject(minioClient)
-
-	tickerWrites := time.NewTicker(250 * time.Millisecond)
+	tickerWrites := time.NewTicker(200 * time.Millisecond)
 	tickerReads := time.NewTicker(100 * time.Millisecond)
 	for {
 		select {
