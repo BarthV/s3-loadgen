@@ -3,7 +3,6 @@ module github.com/BarthV/s3-loadgen
 go 1.12
 
 require (
-	github.com/Pallinder/go-randomdata v1.1.0
 	github.com/go-ini/ini v1.42.0 // indirect
 	github.com/minio/minio-go v6.0.14+incompatible
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
