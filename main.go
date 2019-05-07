@@ -120,7 +120,7 @@ func prepareBuckets(minioClient *minio.Client) {
 }
 
 func fillReadBucket(minioClient *minio.Client) {
-	for i := 1; i <= 200; i++ {
+	for i := 1; i <= 1000; i++ {
 		writeObjectWithID(i, minioClient)
 	}
 }
@@ -159,7 +159,7 @@ func writeObjectWithID(id int, minioClient *minio.Client) {
 
 func readRndObject(minioClient *minio.Client) {
 	readOpCounter.Inc()
-	objectNameWithID := fmt.Sprintf("s3-loadgen-%d", rand.Intn(200)+1)
+	objectNameWithID := fmt.Sprintf("s3-loadgen-%d", rand.Intn(1000)+1)
 	objectFilePath := fmt.Sprintf("/tmp/%s", objectNameWithID)
 
 	start := time.Now()
