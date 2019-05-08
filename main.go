@@ -55,12 +55,12 @@ var (
 	writeDurationsHistogram = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "s3_write_durations_histogram_seconds",
 		Help:    "S3 write operations latency distributions.",
-		Buckets: []float64{0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.11, 0.12, 0.14, 0.16, 0.18, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1},
+		Buckets: []float64{0.02, 0.03, 0.035, 0.04, 0.045, 0.05, 0.055, 0.06, 0.065, 0.07, 0.08, 0.09, 0.1, 0.11, 0.125, 0.15, 0.16, 0.18, 0.2, 0.3, 0.4, 0.5},
 	})
 	readDurationsHistogram = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "s3_read_durations_histogram_seconds",
 		Help:    "S3 read operations latency distributions.",
-		Buckets: []float64{0.006, 0.01, 0.012, 0.014, 0.016, 0.018, 0.02, 0.024, 0.028, 0.035, 0.05, 0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5},
+		Buckets: []float64{0.006, 0.01, 0.012, 0.013, 0.014, 0.015, 0.016, 0.018, 0.02, 0.024, 0.028, 0.035, 0.05, 0.075, 0.1, 0.125, 0.15, 0.2, 0.3, 0.4, 0.5},
 	})
 )
 
