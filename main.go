@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -156,11 +157,14 @@ func writeObjectWithID(id int, minioClient *minio.Client) {
 }
 
 func readRndObject(minioClient *minio.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	readOpCounter.Inc()
 	objectNameWithID := fmt.Sprintf("s3-loadgen-%d", rand.Intn(2000)+1)
 
 	start := time.Now()
-	obj, err := minioClient.GetObject(readBucketName, objectNameWithID, minio.GetObjectOptions{})
+	obj, err := minioClient.GetObjectWithContext(ctx, readBucketName, objectNameWithID, minio.GetObjectOptions{})
 	if err != nil {
 		log.Errorf("Cannot touch S3 object %s : %s", objectNameWithID, err)
 		readErrCounter.Inc()
@@ -194,11 +198,15 @@ func readRndObject(minioClient *minio.Client) {
 }
 
 func writeRndObject(minioClient *minio.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	writeOpCounter.Inc()
+
 	objectRandomName := fmt.Sprintf("s3-loadgen-%d", rand.Intn(9999999999)+1)
 
 	start := time.Now()
-	n, err := minioClient.PutObject(writeBucketName, objectRandomName, strings.NewReader(randomAlphaString(250000)), 250000, minio.PutObjectOptions{ContentType: "text/plain"})
+	n, err := minioClient.PutObjectWithContext(ctx, writeBucketName, objectRandomName, strings.NewReader(randomAlphaString(250000)), 250000, minio.PutObjectOptions{ContentType: "text/plain"})
 	writeDuration := time.Since(start)
 
 	if err != nil {
