@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/minio/minio-go"
+	"github.com/minio/minio-go/pkg/credentials"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
@@ -27,7 +28,7 @@ var (
 
 	writeBucketName = "s3-loadgen-writes"
 	readBucketName  = "s3-loadgen-reads"
-	location        = "par"
+	location        = "us-east-1"
 
 	writeOpCounter = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "s3_write_counter",
@@ -234,7 +235,14 @@ func main() {
 
 	// Initialize minio client object
 	log.Infof("Connecting to %s", *endpoint)
-	minioClient, err := minio.New(*endpoint, *accessKeyID, *secretAccessKey, *useSSL)
+	// minioClient, err := minio.NewV2(*endpoint, *accessKeyID, *secretAccessKey, *useSSL)
+	opts := minio.Options{
+		Creds:        credentials.NewStaticV4(*accessKeyID, *secretAccessKey, ""),
+		Secure:       *useSSL,
+		Region:       location,
+		BucketLookup: minio.BucketLookupPath,
+	}
+	minioClient, err := minio.NewWithOptions(*endpoint, &opts)
 	if err != nil {
 		log.Fatalln(err)
 	}
