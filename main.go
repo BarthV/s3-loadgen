@@ -129,11 +129,22 @@ func prepareBuckets(minioClient *minio.Client) {
 		}
 	} else {
 		log.Printf("Successfully created %s bucket\n", readBucketName)
+		lifecycle1d := `<LifecycleConfiguration>
+			<Rule>
+				<ID>expire-bucket</ID>
+				<Prefix></Prefix>
+				<Status>Enabled</Status>
+				<Expiration>
+					<Days>1</Days>
+				</Expiration>
+			</Rule>
+		</LifecycleConfiguration>`
+		minioClient.SetBucketLifecycle(readBucketName, lifecycle1d)
 	}
 }
 
 func fillReadBucket(minioClient *minio.Client) {
-	for i := 1; i <= 2000; i++ {
+	for i := 1; i <= 10000; i++ {
 		writeObjectWithID(i, minioClient)
 	}
 }
@@ -162,7 +173,7 @@ func readRndObject(minioClient *minio.Client) {
 	defer cancel()
 
 	readOpCounter.Inc()
-	objectNameWithID := fmt.Sprintf("s3-loadgen-%d", rand.Intn(2000)+1)
+	objectNameWithID := fmt.Sprintf("s3-loadgen-%d", rand.Intn(10000)+1)
 
 	start := time.Now()
 	obj, err := minioClient.GetObjectWithContext(ctx, readBucketName, objectNameWithID, minio.GetObjectOptions{})
@@ -253,8 +264,8 @@ func main() {
 	prepareBuckets(minioClient)
 	fillReadBucket(minioClient)
 
-	tickerWrites := time.NewTicker(200 * time.Millisecond)
-	tickerReads := time.NewTicker(100 * time.Millisecond)
+	tickerWrites := time.NewTicker(150 * time.Millisecond)
+	tickerReads := time.NewTicker(75 * time.Millisecond)
 	for {
 		select {
 		case <-tickerWrites.C:
